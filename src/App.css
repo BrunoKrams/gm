@@ -121,6 +121,26 @@ thead th {
   padding: 0.65rem;
 }
 
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable-th:hover .th-label {
+  color: var(--accent);
+}
+
+.th-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sort-indicator {
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
 tbody td {
   border-bottom: 1px solid var(--border);
   padding: 0.5rem 0.65rem;

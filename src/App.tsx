@@ -30,6 +30,34 @@ function App() {
   const [newGalleryName, setNewGalleryName] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
+  type SortCol = 'artist' | 'technique' | 'title' | 'dimensions' | 'notes'
+  const sortableCols: Array<{ key: SortCol; label: string }> = [
+    { key: 'artist', label: 'Artist' },
+    { key: 'technique', label: 'Technique' },
+    { key: 'title', label: 'Title' },
+    { key: 'dimensions', label: 'Dimensions' },
+    { key: 'notes', label: 'Notes' },
+  ]
+  const [sortCol, setSortCol] = useState<SortCol | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  const toggleSort = (col: SortCol) => {
+    if (sortCol === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortCol(col)
+      setSortDir('asc')
+    }
+  }
+
+  const displayedImages = useMemo(() => {
+    if (!sortCol) return selectedImages
+    return [...selectedImages].sort((a, b) => {
+      const cmp = a[sortCol].localeCompare(b[sortCol])
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [selectedImages, sortCol, sortDir])
+
   const selectedImage = useMemo(
     () => selectedImages.find((image) => image.id === selectedImageId) ?? null,
     [selectedImageId, selectedImages],
@@ -213,15 +241,20 @@ function App() {
             <thead>
               <tr>
                 <th>Image</th>
-                <th>Artist</th>
-                <th>Technique</th>
-                <th>Title</th>
-                <th>Dimensions</th>
-                <th>Notes</th>
+                {sortableCols.map((col) => (
+                  <th key={col.key} className="sortable-th" onClick={() => toggleSort(col.key)}>
+                    <div className="th-label">
+                      <span>{col.label}</span>
+                      {sortCol === col.key && (
+                        <span className="sort-indicator">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {selectedImages.map((image) => {
+              {displayedImages.map((image) => {
                 const fields: Array<'artist' | 'technique' | 'title' | 'dimensions' | 'notes'> = [
                   'artist',
                   'technique',

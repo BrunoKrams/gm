@@ -11,19 +11,19 @@ import {
   SUPPORTED_IMAGE_TYPES,
 } from '../utils/image'
 import { deleteImageData, getAllImageData, saveImageData } from '../utils/imageDb'
-import { isDirectoryPickerSupported, pickWorkspaceDirectory } from '../utils/fsAccess'
+import { isFilePickerSupported, pickDatabaseFile, pickDirectoryForNewDatabase } from '../utils/fsAccess'
 
 type ImageDataMap = Record<string, { full: string; thumb: string }>
 
 export function useGalleryStore() {
-  const browserSupported = isDirectoryPickerSupported()
+  const browserSupported = isFilePickerSupported()
   const dbRef = useRef<GalleryDb | null>(null)
-  const [workspaceName, setWorkspaceName] = useState<string | null>(null)
+  const [dbName, setDbName] = useState<string | null>(null)
   const [galleries, setGalleries] = useState<Gallery[]>([])
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null)
   const [images, setImages] = useState<ImageRecord[]>([])
-  const [recentIds, setRecentIds] = useState<string[]>([])
   const [imageData, setImageData] = useState<ImageDataMap>({})
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null)
 
   // Load image blobs from IndexedDB whenever images list changes
   useEffect(() => {
@@ -32,7 +32,7 @@ export function useGalleryStore() {
   }, [images])
 
   const getDb = (): GalleryDb => {
-    if (!dbRef.current) throw new Error('No workspace open. Use Open Workspace first.')
+    if (!dbRef.current) throw new Error('No database open. Open a gallery file first.')
     return dbRef.current
   }
 
@@ -46,17 +46,12 @@ export function useGalleryStore() {
     setImages(d.listImages(galleryId))
   }
 
-  const refreshRecent = (d: GalleryDb) => {
-    setRecentIds(d.listRecent())
-  }
-
-  const openWorkspace = async () => {
-    const dirHandle = await pickWorkspaceDirectory()
-    const instance = await GalleryDb.open(dirHandle)
+  const openDatabase = async () => {
+    const fileHandle = await pickDatabaseFile()
+    const instance = await GalleryDb.open(fileHandle)
     dbRef.current = instance
-    setWorkspaceName(dirHandle.name || 'browser-storage')
+    setDbName(instance.path)
     const list = refreshGalleries(instance)
-    refreshRecent(instance)
     if (list.length > 0) {
       setSelectedGalleryId(list[0].id)
       setImages(instance.listImages(list[0].id))
@@ -71,36 +66,16 @@ export function useGalleryStore() {
     [galleries, selectedGalleryId],
   )
 
-  const recentGalleries = useMemo<Gallery[]>(
-    () =>
-      recentIds
-        .map((id) => galleries.find((g) => g.id === id) ?? null)
-        .filter((g): g is Gallery => g !== null),
-    [galleries, recentIds],
-  )
-
   const createGallery = async (name: string) => {
-    const d = getDb()
-    const hadAnyGallery = d.listGalleries().length > 0
-    const gallery = d.createGallery(name)
-    if (!hadAnyGallery) {
-      d.setFilenameForGallery(gallery.name)
-    }
-    d.touchRecent(gallery.id)
-    await d.save()
-    refreshGalleries(d)
-    refreshRecent(d)
+    const { fileHandle, dirName } = await pickDirectoryForNewDatabase(name)
+    const instance = await GalleryDb.open(fileHandle, `${dirName}/${fileHandle.name}`)
+    dbRef.current = instance
+    const gallery = instance.createGallery(name)
+    await instance.save()
+    setDbName(instance.path)
+    refreshGalleries(instance)
     setSelectedGalleryId(gallery.id)
     setImages([])
-  }
-
-  const openGallery = async (galleryId: string) => {
-    const d = getDb()
-    d.touchRecent(galleryId)
-    await d.save()
-    refreshRecent(d)
-    setSelectedGalleryId(galleryId)
-    refreshImages(d, galleryId)
   }
 
   const deleteGallery = async (galleryId: string) => {
@@ -110,7 +85,6 @@ export function useGalleryStore() {
     d.deleteGallery(galleryId)
     await d.save()
     const remaining = refreshGalleries(d)
-    refreshRecent(d)
     if (remaining.length > 0) {
       setSelectedGalleryId(remaining[0].id)
       refreshImages(d, remaining[0].id)
@@ -123,11 +97,15 @@ export function useGalleryStore() {
   const importFiles = async (files: FileList | File[]): Promise<number> => {
     const d = getDb()
     if (!selectedGalleryId) throw new Error('Select a gallery first')
+
+    const supportedFiles = Array.from(files).filter((f) => SUPPORTED_IMAGE_TYPES.has(f.type))
+    if (supportedFiles.length === 0) return 0
+
+    setImportProgress({ current: 0, total: supportedFiles.length })
     const freshData: ImageDataMap = {}
     let count = 0
 
-    for (const file of Array.from(files)) {
-      if (!SUPPORTED_IMAGE_TYPES.has(file.type)) continue
+    for (const file of supportedFiles) {
       const imageFull = await fileToDataUrl(file)
       const imageThumb = await makeThumbnailDataUrl(imageFull)
       const dims = await imageDimensions(imageFull)
@@ -149,12 +127,13 @@ export function useGalleryStore() {
         importedAt: new Date().toISOString(),
       })
       count++
+      setImportProgress({ current: count, total: supportedFiles.length })
     }
 
-    if (count === 0) return 0
     await d.save()
     setImageData((prev) => ({ ...prev, ...freshData }))
     refreshImages(d, selectedGalleryId)
+    setImportProgress(null)
     return count
   }
 
@@ -188,15 +167,14 @@ export function useGalleryStore() {
 
   return {
     browserSupported,
-    workspaceName,
+    dbName,
     galleries,
     selectedGallery,
     selectedImages: images,
-    recentGalleries,
     imageData,
-    openWorkspace,
+    importProgress,
+    openDatabase,
     createGallery,
-    openGallery,
     deleteGallery,
     importFiles,
     updateImage,

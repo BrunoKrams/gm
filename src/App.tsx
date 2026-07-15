@@ -7,20 +7,18 @@ import type { ImageRecord } from './types/gallery'
 function App() {
   const {
     browserSupported,
-    workspaceName,
-    galleries,
+    dbName,
     selectedGallery,
     selectedImages,
-    recentGalleries,
     createGallery,
-    openGallery,
     deleteGallery,
     importFiles,
     updateImage,
     deleteImage,
     buildExportName,
     imageData,
-    openWorkspace,
+    importProgress,
+    openDatabase,
   } = useGalleryStore()
 
   const [status, setStatus] = useState('Ready')
@@ -28,6 +26,8 @@ function App() {
   const [previewImage, setPreviewImage] = useState<ImageRecord | null>(null)
   const [editModal, setEditModal] = useState<ImageRecord | null>(null)
   const [editForm, setEditForm] = useState({ artist: '', technique: '', title: '', dimensions: '', notes: '' })
+  const [newGalleryModal, setNewGalleryModal] = useState(false)
+  const [newGalleryName, setNewGalleryName] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const selectedImage = useMemo(
@@ -54,10 +54,10 @@ function App() {
     setStatus('Image metadata updated')
   }
 
-  const onOpenWorkspace = async () => {
+  const onOpenDatabase = async () => {
     try {
-      await openWorkspace()
-      setStatus('Workspace opened')
+      await openDatabase()
+      setStatus('Gallery opened')
     } catch (error) {
       if (error instanceof Error && error.name !== 'AbortError') {
         setStatus(error.message)
@@ -65,30 +65,23 @@ function App() {
     }
   }
 
-  const onCreateGallery = async () => {
-    if (!workspaceName) { setStatus('Open a workspace folder first'); return }
-    const name = window.prompt('Gallery name')
-    if (!name) return
-    try {
-      await createGallery(name)
-      setStatus(`Created gallery: ${name.trim()}`)
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Failed to create gallery')
-    }
+  const onCreateGallery = () => {
+    setNewGalleryName('')
+    setNewGalleryModal(true)
   }
 
-  const onOpenGallery = () => {
-    if (galleries.length === 0) { setStatus('No galleries yet. Create one first.'); return }
-    const listing = galleries.map((g, i) => `${i + 1}. ${g.name}`).join('\n')
-    const picked = window.prompt(`Switch gallery:\n${listing}\n\nType a number`)
-    if (!picked) return
-    const index = Number.parseInt(picked, 10) - 1
-    if (!Number.isInteger(index) || index < 0 || index >= galleries.length) {
-      setStatus('Invalid selection'); return
+  const onNewGalleryCreate = async () => {
+    const name = newGalleryName.trim()
+    if (!name) return
+    setNewGalleryModal(false)
+    try {
+      await createGallery(name)
+      setStatus(`Created gallery: ${name}`)
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        setStatus(error instanceof Error ? error.message : 'Failed to create gallery')
+      }
     }
-    const gallery = galleries[index]
-    void openGallery(gallery.id)
-    setStatus(`Opened gallery: ${gallery.name}`)
   }
 
   const onDeleteGallery = async () => {
@@ -176,14 +169,11 @@ function App() {
         </div>
       )}
       <header className="toolbar">
-        <button type="button" onClick={onOpenWorkspace} disabled={!browserSupported}>
+        <button type="button" onClick={onOpenDatabase} disabled={!browserSupported}>
           {renderToolbarButtonContent('openWorkspace')}
         </button>
-        <button type="button" onClick={onCreateGallery} disabled={!workspaceName}>
+        <button type="button" onClick={onCreateGallery} disabled={!browserSupported}>
           {renderToolbarButtonContent('newGallery')}
-        </button>
-        <button type="button" onClick={onOpenGallery} disabled={!workspaceName || galleries.length === 0}>
-          {renderToolbarButtonContent('openGallery')}
         </button>
         <button type="button" onClick={onDeleteGallery} disabled={!selectedGallery}>
           {renderToolbarButtonContent('deleteGallery')}
@@ -214,37 +204,8 @@ function App() {
       <main className="content">
         <section className="gallery-header">
           <h1>
-            {selectedGallery
-              ? `Gallery: ${selectedGallery.name}`
-              : workspaceName
-                ? `Workspace: ${workspaceName}`
-                : 'No workspace open'}
+            {dbName ?? 'No gallery open'}
           </h1>
-          <p>
-            {selectedGallery
-              ? 'Select an image and click Edit to update its metadata. Double-click a thumbnail to preview.'
-              : workspaceName
-                ? 'Create or switch to a gallery.'
-                : 'Click Open Workspace to pick a folder — files are saved as gm_<GALLERY_NAME>.gmd.'}
-          </p>
-          {recentGalleries.length > 0 && (
-            <p className="recent">
-              Recent:{' '}
-              {recentGalleries.map((gallery) => (
-                <button
-                  key={gallery.id}
-                  type="button"
-                  className="link-button"
-                  onClick={() => {
-                    void openGallery(gallery.id)
-                    setStatus(`Switched to: ${gallery.name}`)
-                  }}
-                >
-                  {gallery.name}
-                </button>
-              ))}
-            </p>
-          )}
         </section>
 
         <section className="table-wrap">
@@ -311,11 +272,34 @@ function App() {
       {previewImage && (
         <div className="preview-backdrop" onClick={() => setPreviewImage(null)}>
           <div className="preview-card" onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="card-close" aria-label="Close" onClick={() => setPreviewImage(null)}>
+              <span className="material-symbols-rounded">close</span>
+            </button>
             <img src={imageData[previewImage.id]?.full ?? ''} alt={previewImage.title || previewImage.originalName} />
             <p>{previewImage.title || previewImage.originalName}</p>
-            <button type="button" onClick={() => setPreviewImage(null)}>
-              Close
-            </button>
+          </div>
+        </div>
+      )}
+
+      {newGalleryModal && (
+        <div className="preview-backdrop" onClick={() => setNewGalleryModal(false)}>
+          <div className="edit-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>New Gallery</h2>
+            <label>
+              Gallery name
+              <input
+                autoFocus
+                value={newGalleryName}
+                onChange={(e) => setNewGalleryName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void onNewGalleryCreate() }}
+              />
+            </label>
+            <div className="edit-modal-actions">
+              <button type="button" onClick={() => setNewGalleryModal(false)}>Cancel</button>
+              <button type="button" className="primary" disabled={!newGalleryName.trim()} onClick={() => void onNewGalleryCreate()}>
+                Choose Folder & Create
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -347,6 +331,20 @@ function App() {
             <div className="edit-modal-actions">
               <button type="button" onClick={() => setEditModal(null)}>Cancel</button>
               <button type="button" className="primary" onClick={commitEdit}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {importProgress && (
+        <div className="import-overlay">
+          <div className="import-card">
+            <p className="import-label">Importing images…</p>
+            <p className="import-count">{importProgress.current} / {importProgress.total}</p>
+            <div className="import-bar-track">
+              <div
+                className="import-bar-fill"
+                style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+              />
             </div>
           </div>
         </div>

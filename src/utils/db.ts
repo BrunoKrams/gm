@@ -8,12 +8,7 @@
 import initSqlJs, { type Database } from 'sql.js'
 
 import type { Gallery, ImageRecord } from '../types/gallery'
-import {
-  findExistingGalleryDbFilename,
-  readDbFile,
-  toGalleryDbFilename,
-  writeDbFile,
-} from './fsAccess'
+import { readDbFile, writeDbFile } from './fsAccess'
 
 let _SQL: Awaited<ReturnType<typeof initSqlJs>> | null = null
 
@@ -46,45 +41,43 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_images_gallery ON images(gallery_id);
-
-  CREATE TABLE IF NOT EXISTS recent_galleries (
-    gallery_id TEXT PRIMARY KEY,
-    opened_at TEXT NOT NULL,
-    FOREIGN KEY(gallery_id) REFERENCES galleries(id) ON DELETE CASCADE
-  );
 `
 
 export class GalleryDb {
   private db: Database
-  private dirHandle: FileSystemDirectoryHandle
-  private dbFilename: string
+  private fileHandle: FileSystemFileHandle
+  private displayPath: string
 
-  private constructor(db: Database, dirHandle: FileSystemDirectoryHandle, dbFilename: string) {
+  private constructor(db: Database, fileHandle: FileSystemFileHandle, displayPath: string) {
     this.db = db
-    this.dirHandle = dirHandle
-    this.dbFilename = dbFilename
+    this.fileHandle = fileHandle
+    this.displayPath = displayPath
   }
 
-  static async open(dirHandle: FileSystemDirectoryHandle): Promise<GalleryDb> {
+  /** Path string to show in the UI (directory/filename when available, filename otherwise). */
+  get path(): string {
+    return this.displayPath
+  }
+
+  /**
+   * Open an existing .gmd file, or initialise an empty database if the file
+   * is new/empty.  Pass a FileSystemFileHandle obtained from
+   * pickDatabaseFile() or pickDirectoryForNewDatabase().
+   */
+  static async open(fileHandle: FileSystemFileHandle, displayPath?: string): Promise<GalleryDb> {
     const SQL = await getSql()
-    const existingFilename = await findExistingGalleryDbFilename(dirHandle)
-    const dbFilename = existingFilename ?? toGalleryDbFilename(dirHandle.name || 'gallery')
-    const existing = await readDbFile(dirHandle, dbFilename)
+    const existing = await readDbFile(fileHandle)
     const db = existing ? new SQL.Database(existing) : new SQL.Database()
     db.run('PRAGMA foreign_keys = ON;')
     db.run(SCHEMA)
-    const instance = new GalleryDb(db, dirHandle, dbFilename)
+    const instance = new GalleryDb(db, fileHandle, displayPath ?? fileHandle.name)
     await instance.save()
     return instance
   }
 
-  setFilenameForGallery(galleryName: string): void {
-    this.dbFilename = toGalleryDbFilename(galleryName)
-  }
-
   async save(): Promise<void> {
     const data = this.db.export()
-    await writeDbFile(this.dirHandle, this.dbFilename, data)
+    await writeDbFile(this.fileHandle, data)
   }
 
   // ── Galleries ────────────────────────────────────────────────────────────
@@ -112,30 +105,6 @@ export class GalleryDb {
 
   deleteGallery(galleryId: string): void {
     this.db.run('DELETE FROM galleries WHERE id = ?', [galleryId])
-  }
-
-  // ── Recent galleries ─────────────────────────────────────────────────────
-
-  listRecent(limit = 10): string[] {
-    const rows = this.db.exec(
-      `SELECT gallery_id FROM recent_galleries ORDER BY opened_at DESC LIMIT ${Number(limit)}`,
-    )
-    if (!rows.length) return []
-    return rows[0].values.map(([id]) => id as string)
-  }
-
-  touchRecent(galleryId: string): void {
-    const openedAt = new Date().toISOString()
-    this.db.run(
-      `INSERT INTO recent_galleries (gallery_id, opened_at) VALUES (?, ?)
-       ON CONFLICT(gallery_id) DO UPDATE SET opened_at = excluded.opened_at`,
-      [galleryId, openedAt],
-    )
-    this.db.run(
-      `DELETE FROM recent_galleries WHERE gallery_id NOT IN (
-         SELECT gallery_id FROM recent_galleries ORDER BY opened_at DESC LIMIT 10
-       )`,
-    )
   }
 
   // ── Images ───────────────────────────────────────────────────────────────

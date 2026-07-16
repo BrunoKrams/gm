@@ -1,16 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import type { Gallery, ImageRecord } from '../types/gallery'
 import { GalleryDb } from '../utils/db'
 import {
-  extensionFromMimeType,
   fileToDataUrl,
   imageDimensions,
   makeThumbnailDataUrl,
-  sanitizeExportName,
   SUPPORTED_IMAGE_TYPES,
 } from '../utils/image'
-import { deleteImageData, getAllImageData, saveImageData } from '../utils/imageDb'
 import { isFilePickerSupported, pickDatabaseFile, pickDirectoryForNewDatabase } from '../utils/fsAccess'
 
 type ImageDataMap = Record<string, { full: string; thumb: string }>
@@ -22,14 +19,15 @@ export function useGalleryStore() {
   const [galleries, setGalleries] = useState<Gallery[]>([])
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null)
   const [images, setImages] = useState<ImageRecord[]>([])
-  const [imageData, setImageData] = useState<ImageDataMap>({})
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null)
 
-  // Load image blobs from IndexedDB whenever images list changes
-  useEffect(() => {
-    const ids = images.map((img) => img.id)
-    void getAllImageData(ids).then((data) => setImageData(data))
-  }, [images])
+  const imageData = useMemo<ImageDataMap>(
+    () =>
+      Object.fromEntries(
+        images.map((image) => [image.id, { full: image.imageFull, thumb: image.imageThumb }]),
+      ),
+    [images],
+  )
 
   const getDb = (): GalleryDb => {
     if (!dbRef.current) throw new Error('No database open. Open a gallery file first.')
@@ -80,8 +78,6 @@ export function useGalleryStore() {
 
   const deleteGallery = async (galleryId: string) => {
     const d = getDb()
-    const imgs = d.listImages(galleryId)
-    for (const img of imgs) void deleteImageData(img.id)
     d.deleteGallery(galleryId)
     await d.save()
     const remaining = refreshGalleries(d)
@@ -102,7 +98,6 @@ export function useGalleryStore() {
     if (supportedFiles.length === 0) return 0
 
     setImportProgress({ current: 0, total: supportedFiles.length })
-    const freshData: ImageDataMap = {}
     let count = 0
 
     for (const file of supportedFiles) {
@@ -111,12 +106,11 @@ export function useGalleryStore() {
       const dims = await imageDimensions(imageFull)
       const id = crypto.randomUUID()
 
-      await saveImageData(id, imageFull, imageThumb)
-      freshData[id] = { full: imageFull, thumb: imageThumb }
-
       d.insertImage({
         id,
         galleryId: selectedGalleryId,
+        imageFull,
+        imageThumb,
         artist: '',
         technique: '',
         title: file.name.replace(/\.[^.]+$/, ''),
@@ -131,7 +125,6 @@ export function useGalleryStore() {
     }
 
     await d.save()
-    setImageData((prev) => ({ ...prev, ...freshData }))
     refreshImages(d, selectedGalleryId)
     setImportProgress(null)
     return count
@@ -149,20 +142,9 @@ export function useGalleryStore() {
 
   const deleteImage = async (imageId: string) => {
     const d = getDb()
-    void deleteImageData(imageId)
     d.deleteImage(imageId)
     await d.save()
-    setImageData((prev) => {
-      const next = { ...prev }
-      delete next[imageId]
-      return next
-    })
     if (selectedGalleryId) refreshImages(d, selectedGalleryId)
-  }
-
-  const buildExportName = (image: ImageRecord): string => {
-    const ext = extensionFromMimeType(image.mimeType)
-    return `${sanitizeExportName(image.title || image.originalName.replace(/\.[^.]+$/, ''))}${ext}`
   }
 
   return {
@@ -179,6 +161,5 @@ export function useGalleryStore() {
     importFiles,
     updateImage,
     deleteImage,
-    buildExportName,
   }
 }

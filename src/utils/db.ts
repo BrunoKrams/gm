@@ -1,9 +1,9 @@
 /**
  * SQLite layer using sql.js (SQLite compiled to WASM).
  *
- * All metadata (galleries, images) lives in a real SQLite database that is
- * written back to the local filesystem via the File System Access API after
- * every mutation.
+ * Gallery and image data (including full/thumbnail image payloads) lives in
+ * a real SQLite database that is written back to the local filesystem via the
+ * File System Access API after every mutation.
  */
 import initSqlJs, { type Database } from 'sql.js'
 
@@ -29,6 +29,8 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS images (
     id TEXT PRIMARY KEY,
     gallery_id TEXT NOT NULL,
+    image_full TEXT NOT NULL DEFAULT '',
+    image_thumb TEXT NOT NULL DEFAULT '',
     artist TEXT NOT NULL DEFAULT '',
     technique TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
@@ -42,6 +44,18 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_images_gallery ON images(gallery_id);
 `
+
+function ensureImageBlobColumns(db: Database): void {
+  const pragma = db.exec('PRAGMA table_info(images)')
+  if (!pragma.length) return
+  const names = new Set(pragma[0].values.map((row) => String(row[1])))
+  if (!names.has('image_full')) {
+    db.run(`ALTER TABLE images ADD COLUMN image_full TEXT NOT NULL DEFAULT ''`)
+  }
+  if (!names.has('image_thumb')) {
+    db.run(`ALTER TABLE images ADD COLUMN image_thumb TEXT NOT NULL DEFAULT ''`)
+  }
+}
 
 export class GalleryDb {
   private db: Database
@@ -70,6 +84,7 @@ export class GalleryDb {
     const db = existing ? new SQL.Database(existing) : new SQL.Database()
     db.run('PRAGMA foreign_keys = ON;')
     db.run(SCHEMA)
+    ensureImageBlobColumns(db)
     const instance = new GalleryDb(db, fileHandle, displayPath ?? fileHandle.name)
     await instance.save()
     return instance
@@ -111,7 +126,7 @@ export class GalleryDb {
 
   listImages(galleryId: string): ImageRecord[] {
     const rows = this.db.exec(
-      `SELECT id, gallery_id, artist, technique, title, dimensions, notes,
+      `SELECT id, gallery_id, image_full, image_thumb, artist, technique, title, dimensions, notes,
               original_name, mime_type, imported_at
        FROM images WHERE gallery_id = ? ORDER BY imported_at DESC`,
       [galleryId],
@@ -120,27 +135,29 @@ export class GalleryDb {
     return rows[0].values.map((r) => ({
       id: r[0] as string,
       galleryId: r[1] as string,
-      imageFull: '',
-      imageThumb: '',
-      artist: r[2] as string,
-      technique: r[3] as string,
-      title: r[4] as string,
-      dimensions: r[5] as string,
-      notes: r[6] as string,
-      originalName: r[7] as string,
-      mimeType: r[8] as string,
-      importedAt: r[9] as string,
+      imageFull: r[2] as string,
+      imageThumb: r[3] as string,
+      artist: r[4] as string,
+      technique: r[5] as string,
+      title: r[6] as string,
+      dimensions: r[7] as string,
+      notes: r[8] as string,
+      originalName: r[9] as string,
+      mimeType: r[10] as string,
+      importedAt: r[11] as string,
     }))
   }
 
-  insertImage(image: Omit<ImageRecord, 'imageFull' | 'imageThumb'>): void {
+  insertImage(image: ImageRecord): void {
     this.db.run(
       `INSERT INTO images
-         (id, gallery_id, artist, technique, title, dimensions, notes, original_name, mime_type, imported_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, gallery_id, image_full, image_thumb, artist, technique, title, dimensions, notes, original_name, mime_type, imported_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         image.id,
         image.galleryId,
+        image.imageFull,
+        image.imageThumb,
         image.artist,
         image.technique,
         image.title,

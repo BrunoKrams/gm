@@ -6,5 +6,4 @@ export const BUTTON_PICTOGRAMS = {
   addImage: { icon: 'add_photo_alternate', label: 'Add' },
   deleteImage: { icon: 'delete', label: 'Delete Image' },
   editImage: { icon: 'edit', label: 'Edit' },
-  exportImage: { icon: 'upload', label: 'Export' },
 } as const

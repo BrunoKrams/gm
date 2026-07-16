@@ -57,19 +57,3 @@ export async function makeThumbnailDataUrl(
   return canvas.toDataURL('image/png')
 }
 
-export function sanitizeExportName(name: string): string {
-  const sanitized = name.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+|[._]+$/g, '')
-  return sanitized || 'image'
-}
-
-export function extensionFromMimeType(mimeType: string): string {
-  const mapping: Record<string, string> = {
-    'image/jpeg': '.jpg',
-    'image/png': '.png',
-    'image/gif': '.gif',
-    'image/bmp': '.bmp',
-    'image/webp': '.webp',
-    'image/tiff': '.tiff',
-  }
-  return mapping[mimeType] ?? '.png'
-}

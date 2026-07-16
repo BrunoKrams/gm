@@ -15,7 +15,6 @@ function App() {
     importFiles,
     updateImage,
     deleteImage,
-    buildExportName,
     imageData,
     importProgress,
     openDatabase,
@@ -159,24 +158,6 @@ function App() {
     setStatus('Image deleted')
   }
 
-  const onExportImage = () => {
-    if (!selectedImage) {
-      setStatus('Select an image first')
-      return
-    }
-
-    const full = imageData[selectedImage.id]?.full ?? ''
-    if (!full) {
-      setStatus('Image data not available')
-      return
-    }
-    const link = document.createElement('a')
-    link.href = full
-    link.download = buildExportName(selectedImage)
-    link.click()
-    setStatus(`Exported image: ${link.download}`)
-  }
-
   const renderToolbarButtonContent = (key: keyof typeof BUTTON_PICTOGRAMS) => {
     const item = BUTTON_PICTOGRAMS[key]
     return (
@@ -215,9 +196,6 @@ function App() {
         </button>
         <button type="button" onClick={openEditModal} disabled={!selectedImage}>
           {renderToolbarButtonContent('editImage')}
-        </button>
-        <button type="button" onClick={onExportImage} disabled={!selectedImage}>
-          {renderToolbarButtonContent('exportImage')}
         </button>
         <input
           ref={fileInputRef}
